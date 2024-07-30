@@ -1,0 +1,21 @@
+/*
+Theme Name:     BuddyBoss Theme Child
+Theme URI:      https://www.buddyboss.com/
+Description:    BuddyBoss Theme makes the BuddyBoss Platform look beautiful.
+Author:         BuddyBoss
+Author URI:     https://www.buddyboss.com/
+Template:       buddyboss-theme
+Version:        1.6.7.1
+Text Domain:    buddyboss-theme-child
+*/
+
+/*
+This stylesheet is never loaded! No need to add CSS rules here.
+*/
+.lms-topic-sidebar-wrapper.lms-topic-sidebar-close {
+    display: none;
+}
+
+.lms-topic-sidebar-wrapper .lms-topic-sidebar-data{
+left:initial !important;
+}
