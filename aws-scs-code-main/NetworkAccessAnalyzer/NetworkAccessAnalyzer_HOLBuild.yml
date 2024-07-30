@@ -1,0 +1,576 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+#Basic VPC with IGW, public subnet, and private subnet.
+
+Parameters:
+
+  AmazonLinuxAMIID: # retreived from the SSM Parameter Store in the current region
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn-ami-hvm-x86_64-gp2
+
+
+Resources:
+
+### VPC 1 resources
+
+  VPC1:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.1.0.0/16
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      Tags:
+      - Key: Name
+        Value: VPC1
+
+  InternetGateway1:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: VPC1
+    Properties:
+      Tags:
+      - Key: Name
+        Value: IGW1
+
+  AttachGateway1:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC1
+      InternetGatewayId: !Ref InternetGateway1
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC1
+      CidrBlock: 10.1.0.0/24
+      MapPublicIpOnLaunch: True
+      AvailabilityZone: !Select [ 0, !GetAZs ]     
+      Tags:
+      - Key: Name
+        Value: VPC1-Sub-Pub-A
+              
+  PublicRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC1
+      Tags:
+      - Key: Name
+        Value: VPC1-RT-Pub
+
+  PublicRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable1
+
+  WebServerSecurityGroup1:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: AttachGateway1
+    Properties:
+      GroupDescription: Security Group for Web server
+      VpcId: !Ref VPC1
+      Tags:
+      - Key: Name
+        Value: WebServerSecurityGroup1
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: 0.0.0.0/0
+
+  EC2Instance1:
+      Type: AWS::EC2::Instance
+      Properties:
+        InstanceType: t2.micro
+        ImageId: !Ref AmazonLinuxAMIID
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            DeleteOnTermination: true
+            SubnetId: !Ref PublicSubnet1
+            GroupSet:
+              - !Ref WebServerSecurityGroup1
+        SourceDestCheck: false
+        Tags:
+          - Key: Name
+            Value: Test1
+        UserData:      #  This code downloads a PHP app. Notice how the last line signals completion:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum -y update
+            yum -y install httpd php
+            chkconfig httpd on
+            wget https://steveatdct.s3.amazonaws.com/metadatapage-dct.zip
+            unzip metadatapage-dct.zip -d /var/www/html/
+            service httpd start
+
+###
+### VPC2 Resources
+###
+
+  VPC2:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.2.0.0/16
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      Tags:
+      - Key: Name
+        Value: VPC2
+    
+  InternetGateway2:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: VPC2
+    Properties:
+      Tags:
+      - Key: Name
+        Value: IGW2
+
+  AttachGateway2:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC2
+      InternetGatewayId: !Ref InternetGateway2
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC2
+      CidrBlock: 10.2.0.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs ]     
+      Tags:
+      - Key: Name
+        Value: VPC2-Sub-Pub-A
+              
+  PublicRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC2
+      Tags:
+      - Key: Name
+        Value: VPC2-RT-Pub
+
+  PublicRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable2
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC2
+      CidrBlock: 10.2.2.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs ]     
+      Tags:
+      - Key: Name
+        Value: VPC2-Sub-Pvt-A
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC2
+      Tags:
+      - Key: Name
+        Value: VPC2-RT-Pvt
+
+  PrivateRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable2
+
+  PrivateRouteNAT2:      
+    Type: AWS::EC2::Route
+    DependsOn: 
+    - AttachGateway2
+    - MyNAT2
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref MyNAT2 
+
+  MyNAT2:
+    Type: AWS::EC2::NatGateway
+    Properties: 
+      AllocationId: !GetAtt EIP2.AllocationId
+      SubnetId: !Ref PublicSubnet2
+      Tags: 
+        - Key: Name
+          Value: "My NAT Gateway"
+
+  EIP2:  
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: !Ref VPC2
+
+  WebServerSecurityGroup2:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: AttachGateway2
+    Properties:
+      GroupDescription: Security Group for Web server
+      VpcId: !Ref VPC2
+      Tags:
+      - Key: Name
+        Value: WebServerSecurityGroup2
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: 0.0.0.0/0
+
+
+  EC2Instance2:
+      Type: AWS::EC2::Instance
+      Properties:
+        InstanceType: t2.micro
+        ImageId: !Ref AmazonLinuxAMIID
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            DeleteOnTermination: true
+            SubnetId: !Ref PrivateSubnet2
+            GroupSet:
+              - !Ref WebServerSecurityGroup2
+        SourceDestCheck: false
+        Tags:
+          - Key: Name
+            Value: Test2
+        UserData:      #  This code downloads a PHP app. Notice how the last line signals completion:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum -y update
+            yum -y install httpd php
+            chkconfig httpd on
+            wget https://steveatdct.s3.amazonaws.com/metadatapage-dct.zip
+            unzip metadatapage-dct.zip -d /var/www/html/
+            service httpd start
+
+
+###
+### VPC3 Resources
+###
+
+  VPC3:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.3.0.0/16
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      Tags:
+      - Key: Name
+        Value: VPC3
+        
+  # Our VPC will need internet access:      
+  InternetGateway3:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: VPC3
+    Properties:
+      Tags:
+      - Key: Name
+        Value: IGW3
+
+
+
+  AttachGateway3:
+    Type: AWS::EC2::VPCGatewayAttachment
+    # Notice how you can't attach an IGW to a VPC unless both are created:
+    Properties:
+      VpcId: !Ref VPC3
+      InternetGatewayId: !Ref InternetGateway3
+
+  # Now some subnets, 2 public and 2 private:
+  PublicSubnet3a:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC3
+      CidrBlock: 10.3.10.0/24
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: ""    # Get the first AZ in the list        
+      Tags:
+      - Key: Name
+        Value: VPC3-Sub-Pub-A
+
+  PublicSubnet3b:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC3
+      CidrBlock: 10.3.20.0/24
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: ""   # Get the second AZ in the list  
+      Tags:
+      - Key: Name
+        Value: VPC3-Sub-Pub-b
+
+  PrivateSubnet3a:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC3
+      CidrBlock: 10.3.50.0/24
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: ""   # Get the first AZ in the list    
+      Tags:
+      - Key: Name
+        Value: VPC3-Sub-Pvt-A
+
+  PrivateSubnet3b:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC3
+      CidrBlock: 10.3.60.0/24
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: ""    # Get the second AZ in the list  
+      Tags:
+      - Key: Name
+        Value: VPC3-Sub-Pvt-B
+        
+     
+  PublicRouteTable3:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC3
+      Tags:
+      - Key: Name
+        Value: VPC3-RT-Pub
+
+  PublicRoute3:  
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway3
+    Properties:
+      RouteTableId: !Ref PublicRouteTable3
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway3
+
+  PublicSubnet3aRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet3a
+      RouteTableId: !Ref PublicRouteTable3
+
+  PublicSubnet3bRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet3b
+      RouteTableId: !Ref PublicRouteTable3
+
+### Begin Private route section
+### Resources needed to download EC2 OS content from Internet or S3
+
+  PrivateRouteTable3:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC3
+      Tags:
+      - Key: Name
+        Value: VPC3-RT-Pvt
+  
+  PrivateSubnet3aRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet3a
+      RouteTableId: !Ref PrivateRouteTable3
+
+  PrivateSubnet3bRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet3b
+      RouteTableId: !Ref PrivateRouteTable3
+
+
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: 'Gateway'
+      VpcId: !Ref VPC3
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - 's3:GetObject'
+            Resource:
+              - '*'
+      RouteTableIds:
+        - !Ref PrivateRouteTable3
+      
+  WebServerSecurityGroup3:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: AttachGateway3
+    Properties:
+      GroupDescription: Security Group for Web server
+      VpcId: !Ref VPC3
+      Tags:
+      - Key: Name
+        Value: WebServerSecurityGroup3
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: 0.0.0.0/0
+
+      
+      
+  EC2Instance3a:
+      Type: AWS::EC2::Instance
+      Properties:
+        InstanceType: t2.micro
+        ImageId: !Ref AmazonLinuxAMIID
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            DeleteOnTermination: true
+            SubnetId: !Ref PrivateSubnet3a
+            GroupSet:
+              - !Ref WebServerSecurityGroup3
+        SourceDestCheck: false
+        Tags:
+          - Key: Name
+            Value: Test3a
+        UserData:      
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum -y update
+            yum -y install httpd php
+            chkconfig httpd on
+            wget https://steveatdct.s3.amazonaws.com/metadatapage-dct.zip
+            unzip metadatapage-dct.zip -d /var/www/html/
+            service httpd start
+
+
+  EC2Instance3b:
+      Type: AWS::EC2::Instance
+      Properties:
+        InstanceType: t2.micro
+        ImageId: !Ref AmazonLinuxAMIID
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            DeleteOnTermination: true
+            SubnetId: !Ref PrivateSubnet3b
+            GroupSet:
+              - !Ref WebServerSecurityGroup3
+        SourceDestCheck: false
+        Tags:
+          - Key: Name
+            Value: Test3b
+        UserData:      
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum -y update
+            yum -y install httpd php
+            chkconfig httpd on
+            wget https://steveatdct.s3.amazonaws.com/metadatapage-dct.zip
+            unzip metadatapage-dct.zip -d /var/www/html/
+            service httpd start
+
+
+        
+# ELBv2 Configuration:  Load Balancer, Listener, & Target Group        
+  AppLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: 
+      IpAddressType: ipv4
+      Name: !Sub '${AWS::StackName}-ALB'
+#     Scheme: Defaults to internet-facing
+      SecurityGroups: 
+        - Ref: WebServerSecurityGroup3
+      Subnets: 
+        - Ref: PublicSubnet3a
+        - Ref: PublicSubnet3b
+#     Type: Defaults to application
+
+  HTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      DefaultActions: 
+        - Type: forward
+          TargetGroupArn: !Ref AppTargetGroup
+      LoadBalancerArn: !Ref AppLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  AppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      HealthCheckEnabled: True
+      HealthCheckIntervalSeconds: 10
+  #   HealthCheckPath: Default "/"
+      HealthCheckPort: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      Name: !Sub '${AWS::StackName}-AppServers'
+      Port: 80
+      Protocol: HTTP
+      TargetType: instance
+      Targets:
+        - Id: !Ref EC2Instance3a
+        - Id: !Ref EC2Instance3b
+      UnhealthyThresholdCount: 5
+      VpcId: !Ref VPC3
+
+
+###
+### VPC Peering and Routes
+###
+
+  Peering1to2:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties: 
+      PeerVpcId: !Ref VPC2
+      Tags: 
+      - Key: Name
+        Value: "Peering 1-2"
+      VpcId: !Ref VPC1
+
+  PeeringRoute1to2:      
+    Type: AWS::EC2::Route
+    DependsOn: 
+    - Peering1to2
+    Properties:
+      RouteTableId: !Ref PublicRouteTable1
+      DestinationCidrBlock: 10.2.0.0/16
+      VpcPeeringConnectionId: !Ref Peering1to2 
+
+  PeeringRoute2to1:      
+    Type: AWS::EC2::Route
+    DependsOn: 
+    - Peering1to2
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 10.1.0.0/16
+      VpcPeeringConnectionId: !Ref Peering1to2       
+
+  Peering2to3:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties: 
+      PeerVpcId: !Ref VPC3
+      Tags: 
+      - Key: Name
+        Value: "Peering 2-3"
+      VpcId: !Ref VPC2
+
+  PeeringRoute2to3:      
+    Type: AWS::EC2::Route
+    DependsOn: 
+    - Peering2to3
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 10.3.0.0/16
+      VpcPeeringConnectionId: !Ref Peering2to3
+
+  PeeringRoute3to2:      
+    Type: AWS::EC2::Route
+    DependsOn: 
+    - Peering2to3
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable3
+      DestinationCidrBlock: 10.2.0.0/16
+      VpcPeeringConnectionId: !Ref Peering2to3 
+
+
+
+
+
+
