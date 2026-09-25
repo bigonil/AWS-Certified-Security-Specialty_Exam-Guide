@@ -1,5 +1,5 @@
 import pytest
-from app import process_items, items, db
+from dummy_backend.app import process_items, items, db
 
 def test_process_items():
     results = process_items(items[:5], db)
