@@ -3,11 +3,13 @@
     "Statement": [
         {
             "Effect": "Allow",
-            "Action": [
-                "iam:ListRoles",
-                "sts:AssumeRole"
-            ],
+            "Action": "iam:ListRoles",
             "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": "sts:AssumeRole",
+            "Resource": "arn:aws:iam::ACCOUNT_B_ID:role/cross-account-s3-access"
         }
     ]
 }
